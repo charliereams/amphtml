@@ -281,11 +281,14 @@
         <amp-img
             src="img/hero@1x.jpg"
             srcset="img/hero@1x.jpg 1x, img/hero@2x.jpg 2x"
-            layout="responsive" width="360" placeholder
+            layout="responsive"
+	    height="1px"
+            placeholder
+            heights="google-adsense-responsive"
             alt="Picture of two chairs on a lake shore with big pine trees"
             title="Opens image in a lightbox"
             role="button" on="tap:headline-img-lightbox"
-            height="216" tabindex="0">
+            tabindex="0">
         </amp-img>
       </figure>
 
@@ -355,7 +358,8 @@
           </p>
 
           <div class="ad-container">
-            <amp-ad width=300 height=250
+            <amp-ad
+                width="300" height="250"
                 type="a9"
                 data-aax_size="300x250"
                 data-aax_pubname="abc123"

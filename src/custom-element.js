@@ -69,6 +69,14 @@ const UpgradeState = {
   UPGRADE_IN_PROGRESS: 4,
 };
 
+/**
+ * @type {Object<string, Array<Array<number>>>}
+ */
+const ResponsiveHeightConstants = {
+  'google-adsense-responsive': [[728, 90], [468, 60], [366, 220], [-Infinity, 234]],
+  'google-adsense-responsive-core': [[728, 90], [468, 60], [366, 220], [-Infinity, 234]],
+  'google-adsense-responsive-link': [[728, 90], [468, 60], [366, 220], [-Infinity, 234]],
+};
 
 /**
  * Caches whether the template tag is supported to avoid memory allocations.
@@ -255,6 +263,7 @@ export function applyLayout_(element) {
   const inputHeight = heightAttr ? parseLength(heightAttr) : null;
   user().assert(inputHeight !== undefined, 'Invalid height value: %s',
       heightAttr);
+  const heightRules = ResponsiveHeightConstants[heightsAttr];
 
   // Effective layout attributes. These are effectively constants.
   let width;
@@ -300,17 +309,21 @@ export function applyLayout_(element) {
         'for fixed-height layout: %s', widthAttr);
   }
   if (layout == Layout.FIXED || layout == Layout.RESPONSIVE) {
-    user().assert(width && width != 'auto',
-        'Expected width to be available and not equal to "auto": %s',
-        widthAttr);
+    if (!heightRules) {
+      user().assert(width && width != 'auto',
+          'Expected width to be available and not equal to "auto": %s',
+          widthAttr);
+    }
   }
   if (layout == Layout.RESPONSIVE) {
-    user().assert(getLengthUnits(width) == getLengthUnits(height),
-        'Length units should be the same for width and height: %s, %s',
-        widthAttr, heightAttr);
+    if (!heightRules) {
+      user().assert(getLengthUnits(width) == getLengthUnits(height),
+          'Length units should be the same for width and height: %s, %s',
+          widthAttr, heightAttr);
+    }
   } else {
     user().assert(heightsAttr === null,
-        'Unexpected "heights" attribute for none-responsive layout');
+        'Unexpected "heights" attribute for non-responsive layout');
   }
 
   // Apply UI.
@@ -329,10 +342,22 @@ export function applyLayout_(element) {
     setStyle(element, 'height', dev().assertString(height));
   } else if (layout == Layout.RESPONSIVE) {
     const sizer = element.ownerDocument.createElement('i-amphtml-sizer');
+    let calculatedHeight;
+    if (heightRules) {
+      calculatedHeight =
+          heightRules.filter(rule => (element.clientWidth >= rule[0]))[0][1] +
+          'px';
+      // console.log('hr=%o hrf=%o x=%o',
+      //     heightRules,
+      //     heightRules.filter(rule => (element.clientWidth >= rule[0])),
+      //     calculatedHeight);
+    } else {
+      calculatedHeight =
+          ((getLengthNumeral(height) / getLengthNumeral(width)) * 100) + '%';
+    }
     setStyles(sizer, {
       display: 'block',
-      paddingTop:
-        ((getLengthNumeral(height) / getLengthNumeral(width)) * 100) + '%',
+      paddingTop: calculatedHeight,
     });
     element.insertBefore(sizer, element.firstChild);
     element.sizerElement_ = sizer;
@@ -845,9 +870,11 @@ function createBaseCustomElementClass(win) {
       // Heights.
       if (this.heightsList_ === undefined &&
           this.layout_ === Layout.RESPONSIVE) {
-        const heightsAttr = this.getAttribute('heights');
-        this.heightsList_ = heightsAttr ?
-            parseSizeList(heightsAttr, /* allowPercent */ true) : null;
+        let heightsAttr = this.getAttribute('heights');
+        if (!ResponsiveHeightConstants[heightsAttr]) {
+          this.heightsList_ = heightsAttr ?
+              parseSizeList(heightsAttr, /* allowPercent */ true) : null;
+        }
       }
       if (this.heightsList_) {
         const sizer = this.getSizer_();
