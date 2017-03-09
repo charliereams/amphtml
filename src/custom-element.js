@@ -70,12 +70,31 @@ const UpgradeState = {
 };
 
 /**
- * @type {Object<string, Array<Array<number>>>}
+ * A mapping from the name of a height rule to a function that computes that
+ * rule. The function expects to be given the available width for the element
+ * as a parameter.
+ * @type {Object<string, function(number):number>}
  */
-const ResponsiveHeightConstants = {
-  'google-adsense-responsive': [[728, 90], [468, 60], [366, 220], [-Infinity, 234]],
-  'google-adsense-responsive-core': [[728, 90], [468, 60], [366, 220], [-Infinity, 234]],
-  'google-adsense-responsive-link': [[728, 90], [468, 60], [366, 220], [-Infinity, 234]],
+const ResponsiveHeightRules = {
+  'google-adsense-responsive': (width) => {
+    if (width >= 728) { return 90; }
+    if (width >= 468) { return 60; }
+    if (width >= 320) { return 100; }
+    if (width >= 300) { return 250; }
+    if (width >= 200) { return 200; }
+    if (width >= 180) { return 150; }
+    return 125;
+  },
+  'google-adsense-responsive-core': (width) => {
+    if (width >= 1200) { return 600; }
+    if (width >= 850) { return width * 0.5; }
+    if (width >= 550) { return width * 0.6; }
+    if (width >= 468) { return width * 0.7; }
+    return width * 3.44;
+  },
+  'google-adsense-responsive-link': (width) => {
+    return (width > 468) ? 15 : 90;
+  },
 };
 
 /**
@@ -263,7 +282,7 @@ export function applyLayout_(element) {
   const inputHeight = heightAttr ? parseLength(heightAttr) : null;
   user().assert(inputHeight !== undefined, 'Invalid height value: %s',
       heightAttr);
-  const heightRules = ResponsiveHeightConstants[heightsAttr];
+  const heightRules = ResponsiveHeightRules[heightsAttr];
 
   // Effective layout attributes. These are effectively constants.
   let width;
@@ -342,19 +361,10 @@ export function applyLayout_(element) {
     setStyle(element, 'height', dev().assertString(height));
   } else if (layout == Layout.RESPONSIVE) {
     const sizer = element.ownerDocument.createElement('i-amphtml-sizer');
-    let calculatedHeight;
-    if (heightRules) {
-      calculatedHeight =
-          heightRules.filter(rule => (element.clientWidth >= rule[0]))[0][1] +
-          'px';
-      // console.log('hr=%o hrf=%o x=%o',
-      //     heightRules,
-      //     heightRules.filter(rule => (element.clientWidth >= rule[0])),
-      //     calculatedHeight);
-    } else {
-      calculatedHeight =
-          ((getLengthNumeral(height) / getLengthNumeral(width)) * 100) + '%';
-    }
+    const calculatedHeight = heightRules
+        ? Math.floor(heightRules(element.clientWidth)) + 'px'
+        : ((getLengthNumeral(height) / getLengthNumeral(width)) * 100) + '%';
+    // console.log('calcHeight=%o', calculatedHeight);
     setStyles(sizer, {
       display: 'block',
       paddingTop: calculatedHeight,
@@ -379,7 +389,6 @@ export function applyLayout_(element) {
   }
   return layout;
 }
-
 
 /**
  * Returns "true" for internal AMP nodes or for placeholder elements.
@@ -871,10 +880,9 @@ function createBaseCustomElementClass(win) {
       if (this.heightsList_ === undefined &&
           this.layout_ === Layout.RESPONSIVE) {
         let heightsAttr = this.getAttribute('heights');
-        if (!ResponsiveHeightConstants[heightsAttr]) {
-          this.heightsList_ = heightsAttr ?
-              parseSizeList(heightsAttr, /* allowPercent */ true) : null;
-        }
+        this.heightsList_ = heightsAttr && !ResponsiveHeightRules[heightsAttr]
+            ? parseSizeList(heightsAttr, /* allowPercent */ true)
+            : null;
       }
       if (this.heightsList_) {
         const sizer = this.getSizer_();
