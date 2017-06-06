@@ -16,30 +16,35 @@
 
 import {LaterpayVendor} from '../laterpay-impl';
 import {toggleExperiment} from '../../../../src/experiments';
-import * as sinon from 'sinon';
 
-describe('LaterpayVendor', () => {
+
+describes.fakeWin('LaterpayVendor', {
+  amp: true,
+  location: 'https://pub.com/doc1',
+}, env => {
+  let win, document, ampdoc;
   let accessService;
   let accessServiceMock;
   let xhrMock;
   let articleTitle;
   let laterpayConfig;
-  let sandbox;
   let vendor;
-  let win;
 
   beforeEach(() => {
-    win = window;
+    win = env.win;
+    ampdoc = env.ampdoc;
+    document = win.document;
+
     laterpayConfig = {
       articleTitleSelector: '#laterpay-test-title',
     };
     accessService = {
-      win,
+      ampdoc,
       getAdapterConfig: () => { return laterpayConfig; },
       buildUrl: () => {},
       loginWithUrl: () => {},
+      getLoginUrl: () => {},
     };
-    sandbox = sinon.sandbox.create();
     accessServiceMock = sandbox.mock(accessService);
 
     articleTitle = document.createElement('h1');
@@ -57,7 +62,6 @@ describe('LaterpayVendor', () => {
     toggleExperiment(win, 'amp-access-laterpay', false);
     accessServiceMock.verify();
     xhrMock.verify();
-    sandbox.restore();
   });
 
   it('should fail without experiment', () => {
@@ -80,10 +84,12 @@ describe('LaterpayVendor', () => {
         .withExactArgs('https://baseurl?param&article_title=test%20title', false)
         .returns(Promise.resolve('https://builturl'))
         .once();
+      accessServiceMock.expects('getLoginUrl')
+        .returns(Promise.resolve('https://builturl'))
+        .once();
       xhrMock.expects('fetchJson')
         .withExactArgs('https://builturl', {
           credentials: 'include',
-          requireAmpResponseSourceOrigin: true,
         })
         .returns(Promise.resolve({access: true}))
         .once();
@@ -93,31 +99,34 @@ describe('LaterpayVendor', () => {
       });
     });
 
-    it('authorization fails due to lack of server config', done => {
+    it('authorization fails due to lack of server config', () => {
       accessServiceMock.expects('buildUrl')
+        .returns(Promise.resolve('https://builturl'))
+        .once();
+      accessServiceMock.expects('getLoginUrl')
         .returns(Promise.resolve('https://builturl'))
         .once();
       xhrMock.expects('fetchJson')
         .withExactArgs('https://builturl', {
           credentials: 'include',
-          requireAmpResponseSourceOrigin: true,
         })
         .returns(Promise.resolve({status: 204}))
         .once();
       return vendor.authorize().catch(err => {
         expect(err.message).to.exist;
-        done();
       });
     });
 
-    it('authorization response from server fails', done => {
+    it('authorization response from server fails', () => {
       accessServiceMock.expects('buildUrl')
+        .returns(Promise.resolve('https://builturl'))
+        .once();
+      accessServiceMock.expects('getLoginUrl')
         .returns(Promise.resolve('https://builturl'))
         .once();
       xhrMock.expects('fetchJson')
         .withExactArgs('https://builturl', {
           credentials: 'include',
-          requireAmpResponseSourceOrigin: true,
         })
         .returns(Promise.reject({
           response: {status: 402},
@@ -127,7 +136,6 @@ describe('LaterpayVendor', () => {
       emptyContainerStub.returns(Promise.resolve());
       return vendor.authorize().then(err => {
         expect(err.access).to.be.false;
-        done();
       });
     });
 
@@ -144,6 +152,9 @@ describe('LaterpayVendor', () => {
         premiumcontent: {
           price: {},
         },
+        subscriptions: [
+          {price: {}},
+        ],
         timepasses: [
           {price: {}},
         ],
@@ -159,8 +170,8 @@ describe('LaterpayVendor', () => {
       expect(container.querySelector('ul')).to.not.be.null;
     });
 
-    it('renders 2 purchase options', () => {
-      expect(container.querySelector('ul').childNodes.length).to.equal(2);
+    it('renders 3 purchase options', () => {
+      expect(container.querySelector('ul').childNodes.length).to.equal(3);
     });
 
   });
@@ -176,6 +187,9 @@ describe('LaterpayVendor', () => {
         premiumcontent: {
           price: {},
         },
+        subscriptions: [
+          {price: {}},
+        ],
         timepasses: [
           {price: {}},
         ],
@@ -208,6 +222,9 @@ describe('LaterpayVendor', () => {
         premiumcontent: {
           price: {},
         },
+        subscriptions: [
+          {price: {}},
+        ],
         timepasses: [
           {price: {}},
         ],
@@ -233,6 +250,4 @@ describe('LaterpayVendor', () => {
     });
 
   });
-
-
 });

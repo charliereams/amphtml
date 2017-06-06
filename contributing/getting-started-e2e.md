@@ -13,8 +13,29 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -->
+- [How to get help](#how-to-get-help)
+- [Intro to Git and GitHub](#intro-to-git-and-github)
+- [Set up your GitHub account and Git](#set-up-your-github-account-and-git)
+- [Get a copy of the amphtml code](#get-a-copy-of-the-amphtml-code)
+  * [Understanding repositories](#understanding-repositories)
+  * [Creating your GitHub fork and your local repository](#creating-your-github-fork-and-your-local-repository)
+- [Set up aliases for the remote Git repositories](#set-up-aliases-for-the-remote-git-repositories)
+- [Building AMP and starting a local server](#building-amp-and-starting-a-local-server)
+- [Create a Git branch](#create-a-git-branch)
+- [Pull the latest changes from the amphtml repository](#pull-the-latest-changes-from-the-amphtml-repository)
+- [Edit files and commit them](#edit-files-and-commit-them)
+- [Testing your changes](#testing-your-changes)
+  * [Running tests locally](#running-tests-locally)
+  * [Adding tests for your change](#adding-tests-for-your-change)
+- [Push your changes to your GitHub fork](#push-your-changes-to-your-github-fork)
+- [Send a Pull Request (i.e. request a code review)](#send-a-pull-request-ie-request-a-code-review)
+- [Respond to Pull Request comments](#respond-to-pull-request-comments)
+- [Delete your branch](#delete-your-branch)
+- [See your changes in production](#see-your-changes-in-production)
+- [⚡⚡⚡... (Next steps)](#-next-steps)
+- [Other resources](#other-resources)
 
-# About this guide
+# Getting Started End-to-end
 
 This end-to-end guide will show you how to contribute code to the AMP Project.  It covers everything from creating a GitHub account to getting your code reviewed and merged.
 
@@ -26,7 +47,7 @@ If you're already familiar with Git/GitHub/etc. or you just want to know what co
 
 If you have a question or are unsure about something while following this end-to-end guide, you can get help from the AMP Project community in many ways:
 
-* If you are tackling a [Great First Issue](https://github.com/ampproject/amphtml/milestone/25) or other GitHub issue you can ask a question as a comment on the issue directly.  This works particularly well if the question is about how to make progress on that specific issue.
+* If you are tackling a [Great First Issue](https://github.com/ampproject/amphtml/labels/Great%20First%20Issue) or other GitHub issue you can ask a question as a comment on the issue directly.  This works particularly well if the question is about how to make progress on that specific issue.
 
 * The [#welcome-contributors](https://amphtml.slack.com/messages/welcome-contributors/) channel on Slack is a place for new contributors getting up to speed in the AMP Project to find help.  You should feel comfortable asking any question in there no matter how basic it may seem to you (e.g. problems getting Git set up, errors during a build, etc.).  If you haven't already signed up for our Slack, you'll need to [request an invitation](https://docs.google.com/forms/d/e/1FAIpQLSd83J2IZA6cdR6jPwABGsJE8YL4pkypAbKMGgUZZriU7Qu6Tg/viewform?fbzx=4406980310789882877).
 
@@ -439,7 +460,7 @@ You can verify the AMP version your browser is using for a given page by looking
 
 The [Release Schedule](release-schedule.md) doc has more details on the release process.
 
-# ⚡⚡⚡...
+# ⚡⚡⚡... (Next steps)
 
 Now that you know the process for making changes to the AMP Project you already have most of the heavy lifting done.  **We look forward to seeing your future contributions to the project.** :)
 

@@ -15,8 +15,12 @@
  */
 
 import {AmpViewerIntegration} from '../amp-viewer-integration';
-import {Messaging, WindowPortEmulator} from '../messaging.js';
-import {ViewerForTesting} from './viewer-for-testing.js';
+import {
+  Messaging,
+  WindowPortEmulator,
+  parseMessage,
+} from '../messaging/messaging';
+import {ViewerForTesting} from './viewer-for-testing';
 import {getSourceUrl} from '../../../../src/url';
 
 
@@ -78,13 +82,14 @@ describes.sandboxed('AmpViewerIntegration', {}, () => {
         let win;
         let messaging;
         let ampViewerIntegration;
+        let origin;
 
         beforeEach(() => {
           win = document.createElement('div');
           win.document = document.createElement('div');
           ampViewerIntegration = new AmpViewerIntegration(win);
           messaging = new Messaging();
-
+          origin = 'http://localhost:9876';
         });
 
         it('should start with the correct message', () => {
@@ -93,7 +98,7 @@ describes.sandboxed('AmpViewerIntegration', {}, () => {
           });
 
           ampViewerIntegration.openChannelAndStart_(
-            viewer, env.ampdoc, messaging);
+            viewer, env.ampdoc, origin, messaging);
 
           const ampdocUrl = env.ampdoc.getUrl();
           const srcUrl = getSourceUrl(ampdocUrl);
@@ -111,7 +116,7 @@ describes.sandboxed('AmpViewerIntegration', {}, () => {
           const initTouchHandlerStub =
             sandbox.stub(ampViewerIntegration, 'initTouchHandler_');
           ampViewerIntegration.openChannelAndStart_(
-            viewer, env.ampdoc, messaging);
+            viewer, env.ampdoc, origin, messaging);
 
           expect(initTouchHandlerStub).to.not.be.called;
         });
@@ -125,7 +130,7 @@ describes.sandboxed('AmpViewerIntegration', {}, () => {
             sandbox.stub(ampViewerIntegration, 'initTouchHandler_');
           ampViewerIntegration.unconfirmedViewerOrigin_ = '';
           ampViewerIntegration.openChannelAndStart_(
-            viewer, env.ampdoc, messaging).then(() => {
+            viewer, env.ampdoc, origin, messaging).then(() => {
               expect(initTouchHandlerStub).to.be.called;
             });
         });
@@ -189,12 +194,17 @@ describes.sandboxed('AmpViewerIntegration', {}, () => {
     });
 
     it('handleMessage_ should resolve', () => {
+      const data = {
+        time: 12345678,
+        id: 'abcdefg',
+      };
+
       const event = {
         source: window,
         origin: viewerOrigin,
         data: {
           app: '__AMPHTML__',
-          data: null,
+          data: JSON.stringify(data),
           name: 'messageName',
           requestid: 1,
           rsvp: true,
@@ -213,6 +223,36 @@ describes.sandboxed('AmpViewerIntegration', {}, () => {
       messaging.handleMessage_(event);
 
       expect(resolveSpy).to.have.been.calledOnce;
+      expect(resolveSpy).to.have.been.calledWith(JSON.stringify(data));
+    });
+
+    it('handleMessage_ should resolve with correct data', () => {
+      const data = 12345;
+
+      const event = {
+        source: window,
+        origin: viewerOrigin,
+        data: {
+          app: '__AMPHTML__',
+          data,
+          name: 'messageName',
+          requestid: 1,
+          rsvp: true,
+          type: 's',
+        },
+      };
+
+      const resolveSpy = sandbox.stub();
+      const rejectSpy = sandbox.stub();
+      const waitingForResponse = {'1': {
+        resolve: resolveSpy,
+        reject: rejectSpy,
+      }};
+
+      sandbox.stub(messaging, 'waitingForResponse_', waitingForResponse);
+      messaging.handleMessage_(event);
+
+      expect(resolveSpy).to.have.been.calledWith(data);
     });
 
     it('handleMessage_ should reject', () => {
@@ -311,6 +351,19 @@ describes.sandboxed('AmpViewerIntegration', {}, () => {
           'Message name: name';
         expect(logErrorSpy).to.have.been.calledWith(state, errString);
       });
+    });
+
+    it('should parseMessage correctly', () => {
+      const obj = {bla: 'la'};
+      const json = JSON.stringify(obj);
+      const badJson = '{a:b';
+      let parsedCorrectly;
+      parsedCorrectly = parseMessage(json);
+      expect(parsedCorrectly.bla).to.equal('la');
+      parsedCorrectly = parseMessage(obj);
+      expect(parsedCorrectly.bla).to.equal('la');
+      expect(parseMessage('should return null')).to.be.null;
+      expect(parseMessage(badJson)).to.be.null;
     });
   });
 });

@@ -16,15 +16,15 @@
 
 import {dev, user} from './log';
 import {isExperimentOn} from './experiments';
-import {viewerForDoc} from './viewer';
-import {xhrFor} from './xhr';
+import {viewerForDoc} from './services';
+import {xhrFor} from './services';
 import {
   isProxyOrigin,
   parseUrl,
   parseQueryString,
   addParamsToUrl,
 } from './url';
-import {timerFor} from './timer';
+import {timerFor} from './services';
 import {getMode} from './mode';
 
 const TIMEOUT_VALUE = 8000;
@@ -96,6 +96,13 @@ export function maybeTrackImpression(win) {
     resolveImpression(timerFor(win).timeoutPromise(TIMEOUT_VALUE, promise,
         'timeout waiting for ad server response').catch(() => {}));
   });
+}
+
+/**
+ * Signal that impression tracking is not relevant in this environment.
+ */
+export function doNotTrackImpression() {
+  trackImpressionPromise = Promise.resolve();
 }
 
 /**

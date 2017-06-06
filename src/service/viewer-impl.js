@@ -18,16 +18,17 @@ import {Observable} from '../observable';
 import {findIndex} from '../utils/array';
 import {map} from '../utils/object';
 import {documentStateFor} from './document-state';
-import {getServiceForDoc} from '../service';
-import {dev} from '../log';
+import {registerServiceBuilderForDoc} from '../service';
+import {dev, duplicateErrorIfNecessary} from '../log';
 import {isIframed} from '../dom';
 import {
+  getSourceOrigin,
   parseQueryString,
   parseUrl,
   removeFragment,
   isProxyOrigin,
 } from '../url';
-import {timerFor} from '../timer';
+import {timerFor} from '../services';
 import {reportError} from '../error';
 import {VisibilityState} from '../visibility-state';
 
@@ -362,6 +363,27 @@ export class Viewer {
       }
     });
 
+    // Replace URL if requested.
+    const replaceUrlParam = this.params_['replaceUrl'];
+    if (ampdoc.isSingleDoc() &&
+        replaceUrlParam &&
+        this.win.history.replaceState) {
+      try {
+        // The origin and source origin must match.
+        const url = parseUrl(this.win.location.href);
+        const replaceUrl = parseUrl(
+            removeFragment(replaceUrlParam) + this.win.location.hash);
+        if (url.origin == replaceUrl.origin &&
+            getSourceOrigin(url) == getSourceOrigin(replaceUrl)) {
+          this.win.history.replaceState({}, '', replaceUrl.href);
+          this.win.location.originalHref = url.href;
+          dev().fine(TAG_, 'replace url:' + replaceUrl.href);
+        }
+      } catch (e) {
+        dev().error(TAG_, 'replaceUrl failed', e);
+      }
+    }
+
     // Remove hash when we have an incoming click tracking string
     // (see impression.js).
     if (this.params_['click']) {
@@ -373,7 +395,7 @@ export class Viewer {
           this.win.location.originalHash = this.win.location.hash;
         }
         this.win.history.replaceState({}, '', newUrl);
-        dev().fine(TAG_, 'replace url:' + this.win.location.href);
+        dev().fine(TAG_, 'replace fragment:' + this.win.location.href);
       }
     }
 
@@ -934,11 +956,13 @@ function parseParams_(str, allParams) {
  */
 function getChannelError(opt_reason) {
   if (opt_reason instanceof Error) {
+    opt_reason = duplicateErrorIfNecessary(opt_reason);
     opt_reason.message = 'No messaging channel: ' + opt_reason.message;
     return opt_reason;
   }
   return new Error('No messaging channel: ' + opt_reason);
 }
+
 
 /**
  * Sets the viewer visibility state. This calls is restricted to runtime only.
@@ -953,9 +977,12 @@ export function setViewerVisibilityState(viewer, state) {
 /**
  * @param {!./ampdoc-impl.AmpDoc} ampdoc
  * @param {!Object<string, string>=} opt_initParams
- * @return {!Viewer}
  */
 export function installViewerServiceForDoc(ampdoc, opt_initParams) {
-  return getServiceForDoc(ampdoc, 'viewer',
-      () => new Viewer(ampdoc, opt_initParams));
+  registerServiceBuilderForDoc(ampdoc,
+      'viewer',
+      function() {
+        return new Viewer(ampdoc, opt_initParams);
+      },
+      /* opt_instantiate */ true);
 }

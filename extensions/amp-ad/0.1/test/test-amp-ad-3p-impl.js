@@ -20,7 +20,7 @@ import {stubService} from '../../../../testing/test-helper';
 import {createElementWithAttributes} from '../../../../src/dom';
 import * as adCid from '../../../../src/ad-cid';
 import '../../../amp-ad/0.1/amp-ad';
-import '../../../amp-sticky-ad/0.1/amp-sticky-ad';
+import '../../../amp-sticky-ad/1.0/amp-sticky-ad';
 import * as lolex from 'lolex';
 import * as sinon from 'sinon';
 
@@ -42,6 +42,7 @@ describe('amp-ad-3p-impl', () => {
   let sandbox;
   let ad3p;
   let win;
+  const whenFirstVisible = Promise.resolve();
 
   beforeEach(() => {
     sandbox = sinon.sandbox.create();
@@ -57,7 +58,7 @@ describe('amp-ad-3p-impl', () => {
       ad3p.buildCallback();
       // Turn the doc to visible so prefetch will be proceeded.
       stubService(sandbox, win, 'viewer', 'whenFirstVisible')
-          .returns(Promise.resolve());
+          .returns(whenFirstVisible);
     });
   });
 
@@ -179,10 +180,10 @@ describe('amp-ad-3p-impl', () => {
   });
 
   describe('preconnectCallback', () => {
-    it('should add preconnect and prefech to DOM header', done => {
+    it('should add preconnect and prefech to DOM header', () => {
       ad3p.buildCallback();
       ad3p.preconnectCallback();
-      setTimeout(() => {
+      return whenFirstVisible.then(() => {
         let fetches = win.document.querySelectorAll('link[rel=prefetch]');
         if (!fetches.length) {
           fetches = win.document.querySelectorAll('link[rel=preload]');
@@ -197,8 +198,7 @@ describe('amp-ad-3p-impl', () => {
             win.document.querySelectorAll('link[rel=preconnect]');
         expect(preconnects[preconnects.length - 1]).to.have.property('href',
             'https://testsrc/');
-        done();
-      }, 0);
+      });
     });
   });
 

@@ -16,11 +16,15 @@
 
 import {
   ActionService,
+  DeferredEvent,
   OBJECT_STRING_ARGS_KEY,
   applyActionInfoArgs,
   parseActionMap,
 } from '../../src/service/action-impl';
 import {AmpDocSingle} from '../../src/service/ampdoc-impl';
+import {KeyCodes} from '../../src/utils/key-codes';
+import {createCustomEvent} from '../../src/event-helper';
+import {toggleExperiment} from '../../src/experiments';
 import {setParentWindow} from '../../src/service';
 import * as sinon from 'sinon';
 
@@ -355,13 +359,13 @@ describe('ActionService parseAction', () => {
 
   it('should apply arg value functions with an event with data', () => {
     const a = parseAction('e:t.m(key1=event.foo)');
-    const event = new CustomEvent('MyEvent', {detail: {foo: 'bar'}});
+    const event = createCustomEvent(window, 'MyEvent', {foo: 'bar'});
     expect(applyActionInfoArgs(a.args, event)).to.deep.equal({key1: 'bar'});
   });
 
   it('should apply arg value functions with an event without data', () => {
     const a = parseAction('e:t.m(key1=foo)');
-    const event = new CustomEvent('MyEvent');
+    const event = createCustomEvent(window, 'MyEvent');
     expect(applyActionInfoArgs(a.args, event)).to.deep.equal({key1: 'foo'});
   });
 
@@ -756,6 +760,10 @@ describe('Action interceptor', () => {
     return target['__AMP_ACTION_QUEUE__'];
   }
 
+  function getActionHandler() {
+    return target['__AMP_ACTION_HANDLER__'];
+  }
+
 
   it('should not initialize until called', () => {
     expect(getQueue()).to.be.undefined;
@@ -787,11 +795,12 @@ describe('Action interceptor', () => {
     action.invoke_(target, 'method2', /* args */ null, 'source2', 'event2');
 
     expect(Array.isArray(getQueue())).to.be.true;
+    expect(getActionHandler()).to.be.undefined;
     expect(getQueue()).to.have.length(2);
 
     const handler = sandbox.spy();
     action.installActionHandler(target, handler);
-    expect(Array.isArray(getQueue())).to.be.false;
+    expect(getActionHandler()).to.not.be.undefined;
     expect(handler).to.have.not.been.called;
 
     clock.tick(10);
@@ -810,7 +819,6 @@ describe('Action interceptor', () => {
     expect(inv1.event).to.equal('event2');
 
     action.invoke_(target, 'method3', /* args */ null, 'source3', 'event3');
-    expect(Array.isArray(getQueue())).to.be.false;
     expect(handler).to.have.callCount(3);
     const inv2 = handler.getCall(2).args[0];
     expect(inv2.target).to.equal(target);
@@ -917,34 +925,40 @@ describes.sandboxed('Action global target', {}, () => {
 });
 
 
-describe('Core events', () => {
+describes.fakeWin('Core events', {amp: true}, env => {
   let sandbox;
   let win;
+  let window;
+  let document;
   let action;
-  let target;
+  let triggerPromise;
 
   beforeEach(() => {
-    sandbox = sinon.sandbox.create();
+    win = window = env.win;
+    document = window.document;
+    sandbox = env.sandbox;
     sandbox.stub(window.document, 'addEventListener');
-    win = {
-      document: {body: {}},
-      services: {
-        vsync: {obj: {}},
-      },
-    };
-    action = new ActionService(new AmpDocSingle(win), document);
-    sandbox.stub(action, 'trigger');
-    target = document.createElement('target');
-    target.setAttribute('id', 'amp-test-1');
-
+    const ampdoc = env.ampdoc;
+    action = new ActionService(ampdoc, document);
+    const originalTrigger = action.trigger;
+    triggerPromise = new Promise((resolve, reject) => {
+      sandbox.stub(action, 'trigger', () => {
+        try {
+          originalTrigger.apply(action, action.trigger.getCall(0).args);
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
     action.vsync_ = {mutate: callback => callback()};
   });
 
   afterEach(() => {
-    sandbox.restore();
+    toggleExperiment(win, 'input-debounced', false);
   });
 
-  it('should trigger tap event', () => {
+  it('should trigger tap event on click', () => {
     expect(window.document.addEventListener).to.have.been.calledWith('click');
     const handler = window.document.addEventListener.getCall(0).args[1];
     const element = {tagName: 'target1', nodeType: 1};
@@ -953,9 +967,35 @@ describe('Core events', () => {
     expect(action.trigger).to.have.been.calledWith(element, 'tap', event);
   });
 
+  it('should trigger tap event on key press if focused element has ' +
+     'role=button', () => {
+    expect(window.document.addEventListener).to.have.been.calledWith('keydown');
+    const handler = window.document.addEventListener.getCall(1).args[1];
+    const element = document.createElement('div');
+    element.setAttribute('role', 'button');
+    const event = {
+      target: element,
+      keyCode: KeyCodes.ENTER,
+      preventDefault: sandbox.stub()};
+    handler(event);
+    expect(event.preventDefault).to.have.been.called;
+    expect(action.trigger).to.have.been.calledWith(element, 'tap', event);
+  });
+
+  it('should NOT trigger tap event on key press if focused element DOES NOT ' +
+     'have role=button', () => {
+    expect(window.document.addEventListener).to.have.been.calledWith('keydown');
+    const handler = window.document.addEventListener.getCall(1).args[1];
+    const element = document.createElement('div');
+    element.setAttribute('role', 'not-a-button');
+    const event = {target: element, keyCode: KeyCodes.ENTER};
+    handler(event);
+    expect(action.trigger).to.not.have.been.called;
+  });
+
   it('should trigger submit event', () => {
     expect(window.document.addEventListener).to.have.been.calledWith('submit');
-    const handler = window.document.addEventListener.getCall(1).args[1];
+    const handler = window.document.addEventListener.getCall(2).args[1];
     const element = {tagName: 'target1', nodeType: 1};
     const event = {target: element};
     handler(event);
@@ -964,10 +1004,128 @@ describe('Core events', () => {
 
   it('should trigger change event', () => {
     expect(window.document.addEventListener).to.have.been.calledWith('change');
-    const handler = window.document.addEventListener.getCall(2).args[1];
+    const handler = window.document.addEventListener.getCall(3).args[1];
     const element = {tagName: 'target2', nodeType: 1};
     const event = {target: element};
     handler(event);
     expect(action.trigger).to.have.been.calledWith(element, 'change', event);
+  });
+
+  it('should trigger change event with details for whitelisted inputs', () => {
+    const handler = window.document.addEventListener.getCall(3).args[1];
+    const element = document.createElement('input');
+    element.setAttribute('type', 'range');
+    element.setAttribute('min', '0');
+    element.setAttribute('max', '10');
+    element.setAttribute('value', '5');
+    const event = {target: element};
+    handler(event);
+    expect(action.trigger).to.have.been.calledWith(
+        element,
+        'change',
+        // Event doesn't seem to play well with sinon matchers
+        sinon.match(object => {
+          const detail = object.detail;
+          return detail.min == 0 && detail.max == 10 && detail.value == 5;
+        }));
+  });
+
+  it('should trigger change event with details for select elements', () => {
+    const handler = window.document.addEventListener.getCall(3).args[1];
+    const element = document.createElement('select');
+    element.innerHTML =
+        `<option value="foo"></option>
+        <option value="bar"></option>
+        <option value="qux"></option>`;
+    element.selectedIndex = 2;
+    const event = {target: element};
+    handler(event);
+
+    expect(action.trigger).to.have.been.calledWith(
+        element,
+        'change',
+        sinon.match(object => {
+          const detail = object.detail;
+          return detail.value == 'qux';
+        }));
+  });
+
+  it('should trigger input-debounced event on input', () => {
+    toggleExperiment(window, 'input-debounced', true);
+    sandbox.stub(action, 'invoke_');
+    const handler = window.document.addEventListener.getCall(4).args[1];
+    const element = document.createElement('input');
+    element.id = 'test';
+    element.setAttribute('on', 'input-debounced:test.hide');
+    element.value = 'foo bar baz';
+    const event = {target: element};
+    document.body.appendChild(element);
+    handler(event);
+
+    return triggerPromise.then(() => {
+      expect(action.trigger).to.have.been.calledWith(
+          element,
+          'input-debounced',
+          sinon.match(event => {
+            const value = event.target.value;
+            return value == 'foo bar baz';
+          }));
+      toggleExperiment(window, 'input-debounced', false);
+    }, () => {
+      assert.fail('Should succeed with experiment.');
+    });
+  });
+
+  it('should not handle input-debounced event without experiment', () => {
+    const handler = window.document.addEventListener.getCall(4).args[1];
+    const element = document.createElement('input');
+    element.setAttribute('on', 'input-debounced:body.hide');
+    element.value = 'foo bar baz';
+    const event = {target: element};
+    handler(event);
+
+    return triggerPromise.then(() => {
+      assert.fail('Should not succeed without experiment.');
+    }, error => {
+      expect(error).to.match(/"input-debounced" experiment/);
+      expect(action.trigger).to.have.been.calledWith(
+          element,
+          'input-debounced',
+          sinon.match(event => {
+            const value = event.target.value;
+            return value == 'foo bar baz';
+          }));
+    });
+  });
+
+  describe('DeferredEvent', () => {
+    it('should copy the properties of an event object', () => {
+      const event = createCustomEvent(window, 'MyEvent', {foo: 'bar'});
+      const deferredEvent = new DeferredEvent(event);
+
+      for (const key in deferredEvent) {
+        if (typeof deferredEvent[key] !== 'function') {
+          expect(deferredEvent[key]).to.deep.equal(event[key]);
+        }
+      }
+    });
+
+    it('should replace functions with throws', () => {
+      const event = createCustomEvent(window, 'MyEvent', {foo: 'bar'});
+      const deferredEvent = new DeferredEvent(event);
+      const errorText = 'cannot access native event functions';
+
+      // Specifically test these commonly used functions
+      expect(() => deferredEvent.preventDefault()).to.throw(errorText);
+      expect(() => deferredEvent.stopPropagation()).to.throw(errorText);
+
+      // Test all functions
+      for (const key in deferredEvent) {
+        const value = deferredEvent[key];
+        if (typeof value === 'function') {
+          expect(() => value()).to.throw(errorText);
+        }
+      }
+    });
   });
 });

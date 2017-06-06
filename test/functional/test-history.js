@@ -21,8 +21,10 @@ import {
   HistoryBindingVirtual_,
   installHistoryServiceForDoc,
 } from '../../src/service/history-impl';
+import {historyForDoc} from '../../src/services';
 import {listenOncePromise} from '../../src/event-helper';
 import {installTimerService} from '../../src/service/timer-impl';
+import {timerFor} from '../../src/services';
 import {parseUrl} from '../../src/url';
 import * as sinon from 'sinon';
 
@@ -185,10 +187,11 @@ describes.sandboxed('History install', {}, () => {
       onMessage: () => function() {},
     };
 
+    installTimerService(window);
     win = {
       services: {
         'viewer': {obj: viewer},
-        'timer': {obj: installTimerService(window)},
+        'timer': {obj: timerFor(window)},
       },
       history: {
         length: 0,
@@ -201,10 +204,11 @@ describes.sandboxed('History install', {}, () => {
       addEventListener: () => null,
     };
     ampdoc = new AmpDocSingle(win);
+    installHistoryServiceForDoc(ampdoc);
   });
 
   it('should create natural binding and make it singleton', () => {
-    const history = installHistoryServiceForDoc(ampdoc);
+    const history = historyForDoc(ampdoc);
     expect(history.binding_).to.be.instanceOf(HistoryBindingNatural_);
     expect(win.services.history.obj).to.equal(history);
     // Ensure that binding is installed as a singleton.
@@ -214,7 +218,7 @@ describes.sandboxed('History install', {}, () => {
 
   it('should create virtual binding', () => {
     viewer.isOvertakeHistory = () => true;
-    const history = installHistoryServiceForDoc(ampdoc);
+    const history = historyForDoc(ampdoc);
     expect(history.binding_).to.be.instanceOf(HistoryBindingVirtual_);
     expect(win.services.history.obj).to.equal(history);
     // Ensure that the global singleton has not been created.
@@ -259,6 +263,14 @@ describes.sandboxed('HistoryBindingNatural', {}, () => {
     history2.cleanup_();
     history.origReplaceState_({'AMP.History': window.history.length - 1},
         undefined);
+    expect(onStackIndexUpdated).to.have.not.been.called;
+  });
+
+  it('should preserve the initial state if possible', () => {
+    history.origReplaceState_({'a': 11}, undefined);
+    const history2 = new HistoryBindingNatural_(window);
+    expect(history.getState_()['a']).to.equal(11);
+    history2.cleanup_();
     expect(onStackIndexUpdated).to.have.not.been.called;
   });
 

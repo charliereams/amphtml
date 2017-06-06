@@ -16,9 +16,11 @@
 
 import {installFormProxy} from './form-proxy';
 import {triggerAnalyticsEvent} from '../../../src/analytics';
-import {documentInfoForDoc} from '../../../src/document-info';
-import {isExperimentOn} from '../../../src/experiments';
-import {getService} from '../../../src/service';
+import {createCustomEvent} from '../../../src/event-helper';
+import {installStylesForShadowRoot} from '../../../src/shadow-embed';
+import {documentInfoForDoc} from '../../../src/services';
+import {iterateCursor} from '../../../src/dom';
+import {formOrNullForElement, setFormForElement} from '../../../src/form';
 import {
   assertAbsoluteHttpOrHttpsUrl,
   assertHttpsUrl,
@@ -27,11 +29,11 @@ import {
   isProxyOrigin,
   parseUrl,
 } from '../../../src/url';
-import {dev, user, rethrowAsync} from '../../../src/log';
-import {onDocumentReady} from '../../../src/document-ready';
-import {xhrFor} from '../../../src/xhr';
+import {dev, user} from '../../../src/log';
+import {getMode} from '../../../src/mode';
+import {xhrFor} from '../../../src/services';
 import {toArray} from '../../../src/types';
-import {templatesFor} from '../../../src/template';
+import {templatesFor} from '../../../src/services';
 import {
   removeElement,
   childElementByAttr,
@@ -39,14 +41,20 @@ import {
 } from '../../../src/dom';
 import {installStyles} from '../../../src/style-installer';
 import {CSS} from '../../../build/amp-form-0.1.css';
-import {vsyncFor} from '../../../src/vsync';
-import {actionServiceForDoc} from '../../../src/action';
-import {timerFor} from '../../../src/timer';
-import {urlReplacementsForDoc} from '../../../src/url-replacements';
+import {vsyncFor} from '../../../src/services';
+import {actionServiceForDoc} from '../../../src/services';
+import {timerFor} from '../../../src/services';
+import {urlReplacementsForDoc} from '../../../src/services';
+import {resourcesForDoc} from '../../../src/services';
 import {
   getFormValidator,
   isCheckValiditySupported,
 } from './form-validators';
+import {
+  FORM_VERIFY_PARAM,
+  getFormVerifier,
+} from './form-verifiers';
+import {deepMerge} from '../../../src/utils/object';
 
 
 /** @type {string} */
@@ -64,6 +72,8 @@ const EXTERNAL_DEPS = [
 
 /** @const @enum {string} */
 const FormState_ = {
+  INITIAL: 'initial',
+  VERIFYING: 'verifying',
   SUBMITTING: 'submitting',
   SUBMIT_ERROR: 'submit-error',
   SUBMIT_SUCCESS: 'submit-success',
@@ -101,6 +111,8 @@ export class AmpForm {
       dev().error(TAG, 'form proxy failed to install', e);
     }
 
+    setFormForElement(element, this);
+
     /** @private @const {string} */
     this.id_ = id;
 
@@ -130,6 +142,9 @@ export class AmpForm {
 
     /** @const @private {!../../../src/service/action-impl.ActionService} */
     this.actions_ = actionServiceForDoc(this.form_);
+
+    /** @const @private {!../../../src/service/resources-impl.Resources} */
+    this.resources_ = resourcesForDoc(this.form_);
 
     /** @const @private {string} */
     this.method_ = (this.form_.getAttribute('method') || 'GET').toUpperCase();
@@ -172,26 +187,27 @@ export class AmpForm {
 
     const inputs = this.form_.elements;
     for (let i = 0; i < inputs.length; i++) {
-      user().assert(!inputs[i].name ||
-          inputs[i].name != SOURCE_ORIGIN_PARAM,
-          'Illegal input name, %s found: %s', SOURCE_ORIGIN_PARAM, inputs[i]);
+      const name = inputs[i].name;
+      user().assert(name != SOURCE_ORIGIN_PARAM && name != FORM_VERIFY_PARAM,
+          'Illegal input name, %s found: %s', name, inputs[i]);
     }
 
     /** @const @private {!./form-validators.FormValidator} */
     this.validator_ = getFormValidator(this.form_);
 
-    // Var-subs for POST will be launched soon. We're splitting this into
-    // two experiments to launch for POST separately.
-    const isVarSubExpOnForPost = isExperimentOn(
-        this.win_, 'amp-form-var-sub-for-post');
-    const isVarSubExpOn = isExperimentOn(this.win_, 'amp-form-var-sub');
-    /** @const @private {boolean} */
-    this.isVarSubsEnabled_ = (
-        (isVarSubExpOnForPost && this.method_ == 'POST') || isVarSubExpOn);
+    /** @const @private {!./form-verifiers.FormVerifier} */
+    this.verifier_ = getFormVerifier(
+        this.form_, () => this.handleXhrVerify_());
 
     this.actions_.installActionHandler(
         this.form_, this.actionHandler_.bind(this));
     this.installEventHandlers_();
+
+    /** @private {?Promise} */
+    this.xhrSubmitPromise_ = null;
+
+    /** @private {?Promise} */
+    this.renderTemplatePromise_ = null;
   }
 
   /**
@@ -217,9 +233,9 @@ export class AmpForm {
     const depElements = this.form_./*OK*/querySelectorAll(
         EXTERNAL_DEPS.join(','));
     // Wait for an element to be built to make sure it is ready.
-    const depPromises = toArray(depElements).map(el => el.whenBuilt());
-    return this.dependenciesPromise_ = Promise.race(
-        [Promise.all(depPromises), this.timer_.promise(2000)]);
+    const promises = toArray(depElements).map(el => el.whenBuilt());
+    return this.dependenciesPromise_ = this.waitOnPromisesOrTimeout_(promises,
+        2000);
   }
 
   /** @private */
@@ -227,13 +243,47 @@ export class AmpForm {
     this.form_.addEventListener(
         'submit', this.handleSubmitEvent_.bind(this), true);
     this.form_.addEventListener('blur', e => {
-      onInputInteraction_(e);
+      checkUserValidityAfterInteraction_(dev().assertElement(e.target));
       this.validator_.onBlur(e);
     }, true);
-    this.form_.addEventListener('input', e => {
-      onInputInteraction_(e);
-      this.validator_.onInput(e);
+    this.form_.addEventListener('change', e => {
+      const input = dev().assertElement(e.target);
+      this.verifier_.onCommit(input, updatedElements => {
+        updatedElements.forEach(updatedElement => {
+          checkUserValidityAfterInteraction_(updatedElement);
+        });
+        this.validator_.onBlur(e);
+        // Move from the VERIFYING state back to INITIAL
+        if (this.state_ === FormState_.VERIFYING) {
+          this.setState_(FormState_.INITIAL);
+        }
+      });
     });
+    this.form_.addEventListener('input', e => {
+      checkUserValidityAfterInteraction_(dev().assertElement(e.target));
+      this.validator_.onInput(e);
+      this.verifier_.onMutate(dev().assertElement(e.target));
+    });
+  }
+
+  /**
+   * Triggers 'amp-form-submit' event in 'amp-analytics' and
+   * generates variables for form fields to be accessible in analytics
+   *
+   * @private
+   */
+  triggerFormSubmitInAnalytics_() {
+    const formDataForAnalytics = {};
+    const formObject = this.getFormAsObject_();
+
+    for (const k in formObject) {
+      if (formObject.hasOwnProperty(k)) {
+        formDataForAnalytics['formFields[' + k + ']'] = formObject[k].join(',');
+      }
+    }
+    formDataForAnalytics['formId'] = this.form_.id;
+
+    this.analyticsEvent_('amp-form-submit', formDataForAnalytics);
   }
 
   /**
@@ -286,24 +336,32 @@ export class AmpForm {
    * @private
    */
   submit_() {
-    let varSubsFields = [];
-    // Only allow variable substitutions for inputs if the form action origin
-    // is the canonical origin.
-    // TODO(mkhatib, #7168): Consider relaxing this.
-    if (this.isVarSubsEnabled_ && this.isSubmittingToCanonical_()) {
-      // Fields that support var substitutions.
-      varSubsFields = this.form_.querySelectorAll(
-          '[type="hidden"][data-amp-replace]');
-    } else if (this.isVarSubsEnabled_) {
-      user().warn(TAG, 'Variable substitutions disabled for non-canonical ' +
-          'origin submit action: %s', this.form_);
-    }
+    const varSubsFields = this.getVarSubsFields_();
     if (this.xhrAction_) {
       this.handleXhrSubmit_(varSubsFields);
     } else if (this.method_ == 'POST') {
       this.handleNonXhrPost_();
     } else if (this.method_ == 'GET') {
       this.handleNonXhrGet_(varSubsFields);
+    }
+  }
+
+  /**
+   * Get form fields that require variable substitutions
+   * @return {!IArrayLike<!HTMLInputElement>}
+   * @private
+   */
+  getVarSubsFields_() {
+    // Only allow variable substitutions for inputs if the form action origin
+    // is the canonical origin.
+    // TODO(mkhatib, #7168): Consider relaxing this.
+    if (this.isSubmittingToCanonical_()) {
+      // Fields that support var substitutions.
+      return this.form_.querySelectorAll('[type="hidden"][data-amp-replace]');
+    } else {
+      user().warn(TAG, 'Variable substitutions disabled for non-canonical ' +
+          'origin submit action: %s', this.form_);
+      return [];
     }
   }
 
@@ -324,60 +382,125 @@ export class AmpForm {
   }
 
   /**
-   * @param {IArrayLike<!HTMLInputElement>} varSubsFields
+   * Send the verify request and control the VERIFYING state.
+   * @return {!Promise}
+   * @private
+   */
+  handleXhrVerify_() {
+    if (this.state_ === FormState_.SUBMITTING) {
+      return Promise.resolve();
+    }
+    this.setState_(FormState_.VERIFYING);
+
+    const verifyXhr = this.doVarSubs_(this.getVarSubsFields_())
+        .then(() => this.doXhr_({[FORM_VERIFY_PARAM]: true}));
+    return verifyXhr;
+  }
+
+  /**
+   * @param {!IArrayLike<!HTMLInputElement>} varSubsFields
    * @private
    */
   handleXhrSubmit_(varSubsFields) {
     this.cleanupRenderedTemplate_();
     this.setState_(FormState_.SUBMITTING);
-    const isHeadOrGet = this.method_ == 'GET' || this.method_ == 'HEAD';
+
+    const p = this.doVarSubs_(varSubsFields)
+        .then(() => {
+          this.triggerFormSubmitInAnalytics_();
+          this.actions_.trigger(this.form_, 'submit', /*event*/ null);
+        })
+        .then(() => this.doXhr_())
+        .then(response => this.handleXhrSubmitSuccess_(response),
+            error => this.handleXhrSubmitFailure_(
+                /** @type {!../../../src/service/xhr-impl.FetchError} */ (
+                    error)));
+
+    if (getMode().test) {
+      this.xhrSubmitPromise_ = p;
+    }
+  }
+
+  /**
+   * Perform asynchronous variable substitution on the fields that require it.
+   * @param {!IArrayLike<!HTMLInputElement>} varSubsFields
+   * @return {!Promise}
+   * @private
+   */
+  doVarSubs_(varSubsFields) {
     const varSubPromises = [];
     for (let i = 0; i < varSubsFields.length; i++) {
       varSubPromises.push(
           this.urlReplacement_.expandInputValueAsync(varSubsFields[i]));
     }
-    // Wait until all variables have been substituted or 100ms timeout.
-    this.waitOnPromisesOrTimeout_(varSubPromises, 100).then(() => {
-      let xhrUrl, body;
-      if (isHeadOrGet) {
-        xhrUrl = addParamsToUrl(
-            dev().assertString(this.xhrAction_), this.getFormAsObject_());
-      } else {
-        xhrUrl = this.xhrAction_;
-        body = new FormData(this.form_);
+    return this.waitOnPromisesOrTimeout_(varSubPromises, 100);
+  }
+
+  /**
+   * Send a request to the form's action endpoint.
+   * @param {!Object<string, string>=} opt_extraValues
+   * @private
+   */
+  doXhr_(opt_extraValues) {
+    const isHeadOrGet = this.method_ == 'GET' || this.method_ == 'HEAD';
+    const values = this.getFormAsObject_(opt_extraValues);
+    this.renderTemplate_(values);
+
+    let xhrUrl, body;
+    if (isHeadOrGet) {
+      xhrUrl = addParamsToUrl(dev().assertString(this.xhrAction_), values);
+    } else {
+      xhrUrl = this.xhrAction_;
+      body = new FormData(this.form_);
+      for (const key in opt_extraValues) {
+        body.append(key, opt_extraValues[key]);
       }
-      this.actions_.trigger(this.form_, 'submit', /*event*/ null);
-      return this.xhr_.fetch(dev().assertString(xhrUrl), {
-        body,
-        method: this.method_,
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-        },
-      }).then(response => {
-        return response.json().then(json => {
-          this.triggerAction_(/* success */ true, json);
-          this.analyticsEvent_('amp-form-submit-success');
-          this.setState_(FormState_.SUBMIT_SUCCESS);
-          this.renderTemplate_(json || {});
-          this.maybeHandleRedirect_(
-              /** @type {../../../src/service/xhr-impl.FetchResponse} */ (
-                  response));
-        }, error => {
-          rethrowAsync('Failed to parse response JSON:', error);
-        });
-      }, error => {
-        this.triggerAction_(
-            /* success */ false, error ? error.responseJson : null);
-        this.analyticsEvent_('amp-form-submit-error');
-        this.setState_(FormState_.SUBMIT_ERROR);
-        this.renderTemplate_(error.responseJson || {});
-        this.maybeHandleRedirect_(
-            /** @type {../../../src/service/xhr-impl.FetchResponse} */ (
-                error));
-        rethrowAsync('Form submission failed:', error);
-      });
+    }
+
+    return this.xhr_.fetch(dev().assertString(xhrUrl), {
+      body,
+      method: this.method_,
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
     });
+  }
+
+  /**
+   * Transition the form to the submit success state.
+   * @param {!../../../src/service/xhr-impl.FetchResponse} response
+   * @return {!Promise}
+   * @private visible for testing
+   */
+  handleXhrSubmitSuccess_(response) {
+    return response.json().then(json => {
+      this.triggerAction_(/* success */ true, json);
+      this.analyticsEvent_('amp-form-submit-success');
+      this.cleanupRenderedTemplate_();
+      this.setState_(FormState_.SUBMIT_SUCCESS);
+      this.renderTemplate_(json || {});
+      this.maybeHandleRedirect_(response);
+    }, error => {
+      user().error(TAG, `Failed to parse response JSON: ${error}`);
+    });
+  }
+
+  /**
+   * Transition the form the the submit error state.
+   * @param {../../../src/service/xhr-impl.FetchError} errorResponse
+   * @private
+   */
+  handleXhrSubmitFailure_(errorResponse) {
+    const error = (errorResponse && errorResponse.error) || errorResponse;
+    this.triggerAction_(
+        /* success */ false, errorResponse ? errorResponse.responseJson : null);
+    this.analyticsEvent_('amp-form-submit-error');
+    this.cleanupRenderedTemplate_();
+    this.setState_(FormState_.SUBMIT_ERROR);
+    this.renderTemplate_(errorResponse.responseJson || {});
+    this.maybeHandleRedirect_(errorResponse.response);
+    user().error(TAG, `Form submission failed: ${error}`);
   }
 
   /** @private */
@@ -399,6 +522,7 @@ export class AmpForm {
     for (let i = 0; i < varSubsFields.length; i++) {
       this.urlReplacement_.expandInputValueSync(varSubsFields[i]);
     }
+    this.triggerFormSubmitInAnalytics_();
   }
 
   /**
@@ -411,7 +535,6 @@ export class AmpForm {
       // reporting and blocking submission on non-valid forms.
       const isValid = checkUserValidityOnSubmission(this.form_);
       if (this.shouldValidate_ && !isValid) {
-        // TODO(#3776): Use .mutate method when it supports passing state.
         this.vsync_.run({
           measure: undefined,
           mutate: reportValidity,
@@ -426,11 +549,11 @@ export class AmpForm {
 
   /**
    * Handles response redirect throught the AMP-Redirect-To response header.
-   * @param {../../../src/service/xhr-impl.FetchResponse} response
+   * @param {!../../../src/service/xhr-impl.FetchResponse} response
    * @private
    */
   maybeHandleRedirect_(response) {
-    if (!response.headers) {
+    if (!response || !response.headers) {
       return;
     }
     const redirectTo = response.headers.get(REDIRECT_TO_HEADER);
@@ -457,7 +580,8 @@ export class AmpForm {
    */
   triggerAction_(success, json) {
     const name = success ? FormState_.SUBMIT_SUCCESS : FormState_.SUBMIT_ERROR;
-    const event = new CustomEvent(`${TAG}.${name}`, {detail: {response: json}});
+    const event =
+        createCustomEvent(this.win_, `${TAG}.${name}`, {response: json});
     this.actions_.trigger(this.form_, name, event);
   }
 
@@ -484,11 +608,12 @@ export class AmpForm {
 
   /**
    * Returns form data as an object.
-   * @return {!Object}
+   * @param {!Object<string, string>=} opt_extraFields
+   * @return {!JSONType}
    * @private
    */
-  getFormAsObject_() {
-    const data = {};
+  getFormAsObject_(opt_extraFields) {
+    const data = /** @type {!JSONType} */ ({});
     const inputs = this.form_.elements;
     const submittableTagsRegex = /^(?:input|select|textarea)$/i;
     const unsubmittableTypesRegex = /^(?:button|image|file|reset)$/i;
@@ -506,6 +631,9 @@ export class AmpForm {
         data[input.name] = [];
       }
       data[input.name].push(input.value);
+    }
+    if (opt_extraFields) {
+      deepMerge(data, opt_extraFields);
     }
     return data;
   }
@@ -535,17 +663,34 @@ export class AmpForm {
    */
   renderTemplate_(data) {
     const container = this.form_./*OK*/querySelector(`[${this.state_}]`);
+    let p = null;
     if (container) {
       const messageId = `rendered-message-${this.id_}`;
       container.setAttribute('role', 'alert');
       container.setAttribute('aria-labeledby', messageId);
       container.setAttribute('aria-live', 'assertive');
-      return this.templates_.findAndRenderTemplate(container, data)
-          .then(rendered => {
-            rendered.id = messageId;
-            rendered.setAttribute('i-amp-rendered', '');
-            container.appendChild(rendered);
-          });
+
+      if (this.templates_.hasTemplate(container)) {
+        p = this.templates_.findAndRenderTemplate(container, data)
+            .then(rendered => {
+              rendered.id = messageId;
+              rendered.setAttribute('i-amphtml-rendered', '');
+              container.appendChild(rendered);
+            });
+      } else {
+        // TODO(vializ): This is to let AMP know that the AMP elements inside
+        // this container are now visible so they get scheduled for layout.
+        // This will be unnecessary when the AMP Layers implementation is
+        // complete. We call mutateElement here and not where the template is
+        // made visible so that we don't do redundant layout work when a
+        // template is rendered too.
+        this.resources_.mutateElement(container, () => {});
+        p = Promise.resolve();
+      }
+    }
+
+    if (getMode().test) {
+      this.renderTemplatePromise_ = p;
     }
   }
 
@@ -557,10 +702,47 @@ export class AmpForm {
     if (!container) {
       return;
     }
-    const previousRender = childElementByAttr(container, 'i-amp-rendered');
+    const previousRender = childElementByAttr(container, 'i-amphtml-rendered');
     if (previousRender) {
       removeElement(previousRender);
     }
+  }
+
+  /**
+   * @return {Array<!Element>}
+   * @public
+   */
+  getDynamicElementContainers() {
+    const dynamicElements = [];
+    const successDiv =
+        this.form_./*OK*/querySelector(`[${FormState_.SUBMIT_SUCCESS}]`);
+    const errorDiv =
+        this.form_./*OK*/querySelector(`[${FormState_.SUBMIT_ERROR}]`);
+    if (successDiv) {
+      dynamicElements.push(successDiv);
+    }
+    if (errorDiv) {
+      dynamicElements.push(errorDiv);
+    }
+    return dynamicElements;
+  }
+
+  /**
+   * Returns a promise that resolves when xhr submit finishes. The promise
+   * will be null if xhr submit has not started.
+   * @visibleForTesting
+   */
+  xhrSubmitPromiseForTesting() {
+    return this.xhrSubmitPromise_;
+  }
+
+  /**
+   * Returns a promise that resolves when tempalte render finishes. The promise
+   * will be null if the template render has not started.
+   * @visibleForTesting
+   */
+  renderTemplatePromiseForTesting() {
+    return this.renderTemplatePromise_;
   }
 }
 
@@ -607,8 +789,6 @@ function getUserValidityStateFor(element) {
 /**
  * Updates class names on the element to reflect the active invalid types on it.
  *
- * TODO(#5005): Maybe propagate the invalid type classes to parents of the input as well.
- *
  * @param {!Element} element
  */
 function updateInvalidTypesClasses(element) {
@@ -632,9 +812,6 @@ function updateInvalidTypesClasses(element) {
  * The specs are still not fully specified. The current solution tries to follow a common
  * sense approach for when to apply these classes. As the specs gets clearer, we should
  * strive to match it as much as possible.
- *
- * TODO(#4317): Follow up on ancestor propagation behavior and understand the future
- *              specs for the :user-valid/:user-inavlid.
  *
  * @param {!Element} element
  * @param {boolean=} propagate Whether to propagate the user validity to ancestors.
@@ -685,11 +862,10 @@ function checkUserValidity(element, propagate = false) {
 /**
  * Responds to user interaction with an input by checking user validity of the input
  * and possibly its input-related ancestors (e.g. feildset, form).
- * @param {!Event} e
+ * @param {!Element} input
  * @private visible for testing.
  */
-export function onInputInteraction_(e) {
-  const input = dev().assertElement(e.target);
+export function checkUserValidityAfterInteraction_(input) {
   checkUserValidity(input, /* propagate */ true);
 }
 
@@ -715,42 +891,91 @@ function isDisabled_(element) {
 
 
 /**
- * Installs submission handler on all forms in the document.
- * @param {!Window} win
+ * Bootstraps the amp-form elements
  */
-function installSubmissionHandlers(win) {
-  onDocumentReady(win.document, doc => {
-    toArray(doc.forms).forEach((form, index) => {
-      if (!form.classList.contains('i-amphtml-form')) {
+export class AmpFormService {
+  /**
+   * @param  {!../../../src/service/ampdoc-impl.AmpDoc} ampdoc
+   */
+  constructor(ampdoc) {
+    /** @const @private {!Promise} */
+    this.whenInitialized_ = this.installStyles_(ampdoc)
+        .then(() => this.installHandlers_(ampdoc));
+  }
+
+  /**
+   * Returns a promise that resolves when all form implementations (if any)
+   * have been upgraded.
+   * @return {!Promise}
+   */
+  whenInitialized() {
+    return this.whenInitialized_;
+  }
+
+  /**
+   * Install the amp-form CSS
+   * @param  {!../../../src/service/ampdoc-impl.AmpDoc} ampdoc
+   * @return {!Promise}
+   * @private
+   */
+  installStyles_(ampdoc) {
+    return new Promise(resolve => {
+      if (ampdoc.isSingleDoc()) {
+        const root = /** @type {!Document} */ (ampdoc.getRootNode());
+        installStyles(root, CSS, resolve);
+      } else {
+        const root = /** @type {!ShadowRoot} */ (ampdoc.getRootNode());
+        installStylesForShadowRoot(root, CSS);
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * Install the event handlers
+   * @param  {!../../../src/service/ampdoc-impl.AmpDoc} ampdoc
+   * @return {!Promise}
+   * @private
+   */
+  installHandlers_(ampdoc) {
+    return ampdoc.whenReady().then(() => {
+      this.installSubmissionHandlers_(
+          ampdoc.getRootNode().querySelectorAll('form'));
+      this.installGlobalEventListener_(ampdoc.getRootNode());
+    });
+  }
+
+  /**
+   * Install submission handler on all forms in the document.
+   * @param {?IArrayLike<T>} forms
+   * @previousValidityState
+   * @template T
+   * @private
+   */
+  installSubmissionHandlers_(forms) {
+    if (!forms) {
+      return;
+    }
+
+    iterateCursor(forms, (form, index) => {
+      const existingAmpForm = formOrNullForElement(form);
+      if (!existingAmpForm) {
         new AmpForm(form, `amp-form-${index}`);
       }
     });
-  });
-}
+  }
 
-
-/**
- * @param {!Window} win
- * @private visible for testing.
- */
-export function installAmpForm(win) {
-  return getService(win, TAG, () => {
-    installStyles(win.document, CSS, () => {
-      installSubmissionHandlers(win);
+  /**
+   * Listen for DOM updated messages sent to the document.
+   * @param {!Document|!ShadowRoot} doc
+   * @private
+   */
+  installGlobalEventListener_(doc) {
+    doc.addEventListener('amp:dom-update', () => {
+      this.installSubmissionHandlers_(doc.querySelectorAll('form'));
     });
-    return {};
-  });
+  }
 }
 
-/**
- * @param {!Window} win
- * @private visible for testing.
- */
-export function installGlobalEventListener(win) {
-  win.document.addEventListener('amp:dom-update', function() {
-    installSubmissionHandlers(win);
-  });
-}
 
-installAmpForm(AMP.win);
-installGlobalEventListener(AMP.win);
+AMP.registerServiceForDoc(TAG, AmpFormService);

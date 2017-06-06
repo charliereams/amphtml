@@ -13,15 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {documentInfoForDoc} from './document-info';
-import {isExperimentOn} from './experiments';
-import {viewerForDoc} from './viewer';
+import {urls} from './config';
+import {documentInfoForDoc} from './services';
+import {experimentToggles, isCanary} from './experiments';
+import {viewerForDoc} from './services';
 import {getLengthNumeral} from './layout';
+import {getModeObject} from './mode-object';
+import {domFingerprint} from './utils/dom-fingerprint';
 
 /**
  * Produces the attributes for the ad template.
  * @param {!Window} parentWindow
- * @param {!Element} element
+ * @param {!AmpElement} element
  * @param {!string} sentinel
  * @param {!Object<string, string>=} attributes
  * @return {!Object}
@@ -43,12 +46,16 @@ export function getContextMetadata(
   }
 
   const docInfo = documentInfoForDoc(element);
-  const referrer = viewerForDoc(element).getUnconfirmedReferrerUrl();
+  const viewer = viewerForDoc(element);
+  const referrer = viewer.getUnconfirmedReferrerUrl();
 
-  const sentinelNameChange = isExperimentOn(
-      parentWindow, 'sentinel-name-change');
+  // TODO(alanorozco): Redesign data structure so that fields not exposed by
+  // AmpContext are not part of this object.
+  const layoutRect = element.getPageLayoutBox();
   attributes._context = {
     ampcontextVersion: '$internalRuntimeVersion$',
+    ampcontextFilepath: urls.cdn + '/$internalRuntimeVersion$' +
+        '/ampcontext-v0.js',
     sourceUrl: docInfo.sourceUrl,
     referrer,
     canonicalUrl: docInfo.canonicalUrl,
@@ -57,17 +64,24 @@ export function getContextMetadata(
       href: locationHref,
     },
     startTime,
+    tagName: element.tagName,
+    mode: getModeObject(),
+    canary: isCanary(parentWindow),
+    hidden: !viewer.isVisible(),
+    initialLayoutRect: layoutRect ? {
+      left: layoutRect.left,
+      top: layoutRect.top,
+      width: layoutRect.width,
+      height: layoutRect.height,
+    } : null,
+    initialIntersection: element.getIntersectionChangeEntry(),
+    domFingerprint: domFingerprint(element),
+    experimentToggles: experimentToggles(parentWindow),
   };
-  attributes._context[sentinelNameChange ? 'sentinel' : 'amp3pSentinel'] =
-      sentinel;
+  attributes._context['sentinel'] = sentinel;
   const adSrc = element.getAttribute('src');
   if (adSrc) {
     attributes.src = adSrc;
   }
   return attributes;
-}
-
-export function getNameAttribute(parentWindow, element, sentinel) {
-  const attributes = getContextMetadata(parentWindow, element, sentinel);
-  return encodeURIComponent(JSON.stringify(attributes));
 }
