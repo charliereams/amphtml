@@ -719,6 +719,7 @@ export class Resources {
    * @param {!../layout-rect.LayoutMarginsChangeDef=} opt_newMargins
    */
   changeSize(element, newHeight, newWidth, opt_callback, opt_newMargins) {
+    console.log('change size!');
     this.scheduleChangeSize_(Resource.forElement(element), newHeight,
         newWidth, opt_newMargins, /* force */ true, opt_callback);
   }
@@ -746,6 +747,7 @@ export class Resources {
       this.scheduleChangeSize_(Resource.forElement(element), newHeight,
         newWidth, opt_newMargins, /* force */ false, success => {
           if (success) {
+            console.log('resized! %o %o %o', element, newHeight, newWidth);
             resolve();
           } else {
             reject(new Error('changeSize attempt denied'));
@@ -950,6 +952,8 @@ export class Resources {
     }
 
     if (this.maybeChangeHeight_) {
+      console.log('maybe change height?');
+
       this.maybeChangeHeight_ = false;
       this.vsync_.measure(() => {
         const measuredScrollHeight = this.viewport_.getScrollHeight();
@@ -1010,6 +1014,7 @@ export class Resources {
       this.maybeChangeHeight_ = true;
     }
     if (this.requestsChangeSize_.length > 0) {
+      console.log('requests to change size', this.requestsChangeSize_.length);
       dev().fine(TAG_, 'change size requests:',
           this.requestsChangeSize_.length);
       const requestsChangeSize = this.requestsChangeSize_;
@@ -1112,8 +1117,12 @@ export class Resources {
           if (box.top >= 0) {
             minTop = minTop == -1 ? box.top : Math.min(minTop, box.top);
           }
+          console.log('request.resource.resize=%o of %o with %o', resize,
+              request.resource,
+              request.resource./*OK*/changeSize);
           request.resource./*OK*/changeSize(
               request.newHeight, request.newWidth, newMargins);
+          console.log('request.resource.overflow=%o', resize);
           request.resource.overflowCallback(/* overflown */ false,
               request.newHeight, request.newWidth, newMargins);
           this.maybeChangeHeight_ = true;
@@ -1144,10 +1153,12 @@ export class Resources {
                   request.newHeight, request.newWidth, request.marginChange ?
                       request.marginChange.newMargins : undefined);
               if (request.callback) {
+                console.log('callback');
                 request.callback(/* hasSizeChanged */true);
               }
             });
             if (minTop != -1) {
+              console.log('mintop -1');
               this.setRelayoutTop_(minTop);
             }
             // Sync is necessary here to avoid UI jump in the next frame.
@@ -1155,6 +1166,7 @@ export class Resources {
             if (newScrollHeight != state./*OK*/scrollHeight) {
               this.viewport_.setScrollTop(state./*OK*/scrollTop +
                   (newScrollHeight - state./*OK*/scrollHeight));
+              console.log('sync');
             }
             this.maybeChangeHeight_ = true;
           },
@@ -1536,9 +1548,11 @@ export class Resources {
   scheduleChangeSize_(resource, newHeight, newWidth, newMargins, force,
       opt_callback) {
     if (resource.hasBeenMeasured() && !newMargins) {
+      console.log('measured');
       this.completeScheduleChangeSize_(resource, newHeight, newWidth,
           undefined, force, opt_callback);
     } else {
+      console.log('unmeasured');
       // This is a rare case since most of times the element itself schedules
       // resize requests. However, this case is possible when another element
       // requests resize of a controlled element. This also happens when a
@@ -1552,6 +1566,7 @@ export class Resources {
           newMargins,
           currentMargins: this.getLayoutMargins_(resource),
         } : undefined;
+        console.log('completing...');
         this.completeScheduleChangeSize_(resource, newHeight, newWidth,
             marginChange, force, opt_callback);
       });
@@ -1597,6 +1612,7 @@ export class Resources {
             TAG_, 'attempting to change size with undefined dimensions',
             resource.debugid);
       }
+      console.log('nothing to do');
       // Nothing to do.
       if (opt_callback) {
         opt_callback(/* success */ true);
@@ -1618,6 +1634,7 @@ export class Resources {
       request.marginChange = marginChange;
       request.force = force || request.force;
       request.callback = opt_callback;
+      console.log('done');
     } else {
       this.requestsChangeSize_.push(/** {!ChangeSizeRequestDef} */{
         resource,
@@ -1627,6 +1644,7 @@ export class Resources {
         force,
         callback: opt_callback,
       });
+      console.log('pushed');
     }
     this.schedulePassVsync();
   }

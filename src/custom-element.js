@@ -871,6 +871,7 @@ function createBaseCustomElementClass(win) {
      * @package @this {!Element}
      */
     changeSize(newHeight, newWidth, opt_newMargins) {
+      console.log('here we go! %o -> %ox%o', this, newWidth, newHeight);
       const sizer = this.getSizer_();
       if (sizer) {
         // From the moment height is changed the element becomes fully
@@ -885,9 +886,11 @@ function createBaseCustomElementClass(win) {
         }
       }
       if (newHeight !== undefined) {
+        console.log('height styled');
         setStyle(this, 'height', newHeight, 'px');
       }
       if (newWidth !== undefined) {
+        console.log('width styled');
         setStyle(this, 'width', newWidth, 'px');
       }
       if (opt_newMargins) {

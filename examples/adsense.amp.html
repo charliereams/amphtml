@@ -42,6 +42,10 @@
       background-color: lightgray;
       padding: 5px;
     }
+    .with-margins {
+      padding-left: 50px;
+      padding-right: 10vw;
+    }
   </style>
   <style amp-boilerplate>body{-webkit-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-moz-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-ms-animation:-amp-start 8s steps(1,end) 0s 1 normal both;animation:-amp-start 8s steps(1,end) 0s 1 normal both}@-webkit-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-moz-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-ms-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-o-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}</style><noscript><style amp-boilerplate>body{-webkit-animation:none;-moz-animation:none;-ms-animation:none;animation:none}</style></noscript>
   <script async src="https://cdn.ampproject.org/v0.js"></script>
@@ -60,37 +64,50 @@
   </amp-user-notification>
 
   <h2>AdSense</h2>
-  <amp-ad width=300 height=250
+  <p>Ad slot 1</p>
+  <amp-ad
+      height=150
+      layout="fixed-height"
       type="adsense"
-      data-ad-client="ca-pub-2005682797531342"
-      data-ad-slot="7046626912">
+      data-ad-client="ca-pub-2383777339857329"
+      data-ad-slot="6148071663">
     <div placeholder></div>
     <div fallback></div>
   </amp-ad>
 
-  <amp-ad width=300 height=250
-          type="adsense"
-          data-ad-client="ca-pub-2005682797531342"
-          data-ad-slot="7046626912"
-          data-consent-notification-id="amp-user-notification">
-    <div placeholder>should only show ad after notification get dismissed</div>
-    <div fallback></div>
-  </amp-ad>
+  <p>Ad slot 2</p>
+  <div class="with-margins">
+    <amp-ad
+        height=150
+        layout="fixed-height"
+        type="adsense"
+        data-ad-client="ca-pub-2383777339857329"
+        data-ad-slot="6148071663">
+      <div placeholder>should only show ad after notification get dismissed</div>
+      <div fallback></div>
+    </amp-ad>
+  </div>
 
   <div class=talldiv>
     <!-- Make the second ad below the fold. -->
   </div>
 
-  <h2>AdSense ad 2</h2>
-
-  <amp-ad width=300 height=250
-      type="adsense"
-      data-ad-client="ca-pub-2005682797531342"
-      data-ad-slot="7046626912"
-      data-adtest="on">
-    <div placeholder></div>
-    <div fallback></div>
-  </amp-ad>
+  <div class="with-margins">
+    <h3>Ad slot 3</h3>
+    <p>Here's a section with weird margins that we can't predict! A fixed-size ad is likely
+    to look wrong here, because the margins don't line up.</p>
+    <amp-ad
+        height=150
+        layout="fixed-height"
+        type="adsense"
+        data-ad-client="ca-pub-2383777339857329"
+        data-ad-slot="6148071663">
+      <div placeholder></div>
+      <div fallback></div>
+    </amp-ad>
+    <p>But with responsive, everything looks good! We can happily scale the ad horizontally and
+    vertically to maintain a good visual experience.</p>
+  </div>
 
 </body>
 </html>

@@ -308,6 +308,9 @@ export class AmpA4A extends AMP.BaseElement {
      * @private {boolean}
      */
     this.isCollapsed_ = false;
+
+    /** @private {*} */
+    this.resizeRequest_ = null;
   }
 
   /** @override */
@@ -399,6 +402,19 @@ export class AmpA4A extends AMP.BaseElement {
 
   /** @override */
   onLayoutMeasure() {
+    console.log('a4a onlayout of %o', this);
+
+    if (!this.resizeRequest_) {
+      const existingHeight = this.getWidth();
+      this.resizeRequest_ = this.attemptChangeSize(1000, 200).then(
+          () => {
+            console.log('yey %o', this);
+          },
+          () => {
+            console.log('no');
+          });
+    }
+
     if (this.xOriginIframeHandler_) {
       this.xOriginIframeHandler_.onLayoutMeasure();
     }
@@ -777,6 +793,9 @@ export class AmpA4A extends AMP.BaseElement {
     // Promise may be null if element was determined to be invalid for A4A.
     if (!this.adPromise_) {
       return Promise.resolve();
+    }
+    if (this.resizeRequest_) {
+      console.log('had resize request');
     }
     // There's no real throttling with A4A, but this is the signal that is
     // most comparable with the layout callback for 3p ads.

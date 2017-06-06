@@ -43,6 +43,8 @@ export class AmpAd extends AMP.BaseElement {
 
   /** @override */
   upgradeCallback() {
+    console.log('amp-ads.js consent check');
+
     // Block whole ad load if a consent is needed.
     /** @const {string} */
     const consentId = this.element.getAttribute('data-consent-notification-id');
@@ -91,6 +93,28 @@ export class AmpAd extends AMP.BaseElement {
           return new AmpAd3PImpl(this.element);
         });
     });
+  }
+
+  /** @override */
+  isLayoutSupported(layout) {
+    return true;
+  }
+
+  isRelayoutNeeded() {
+    return Math.random() < .9;
+  }
+
+  /** @override */
+  onLayoutMeasure() {
+    console.log('amp-ad.js request resize!');
+    this.attemptChangeSize(200, 5000);
+    super.onLayoutMeasure();
+  }
+
+  /** @override */
+  layoutCallback() {
+    console.log('layout callback!');
+    super.layoutCallback();
   }
 }
 

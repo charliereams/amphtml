@@ -24,8 +24,10 @@ import {LayoutDelayMeter} from './layout-delay-meter';
 import {getAdCid} from '../../../src/ad-cid';
 import {preloadBootstrap} from '../../../src/3p-frame';
 import {isLayoutSizeDefined} from '../../../src/layout';
-import {isAdPositionAllowed, getAdContainer,}
-    from '../../../src/ad-helper';
+import {
+  isAdPositionAllowed, getAdContainer,
+}
+  from '../../../src/ad-helper';
 import {adConfig} from '../../../ads/_config';
 import {
   getLifecycleReporter,
@@ -97,6 +99,9 @@ export class AmpAd3PImpl extends AMP.BaseElement {
     /** @private {!./layout-delay-meter.LayoutDelayMeter} */
     this.layoutDelayMeter_ = new LayoutDelayMeter(this.win);
     this.lifecycleReporter.sendPing('adSlotBuilt');
+
+    /** @private {*} */
+    this.resizeRequest_ = null;
   }
 
   /** @override */
@@ -111,8 +116,7 @@ export class AmpAd3PImpl extends AMP.BaseElement {
     }
     // Otherwise the ad is good to go.
     const elementCheck = getAmpAdRenderOutsideViewport(this.element);
-    return elementCheck !== null ?
-      elementCheck : super.renderOutsideViewport();
+    return elementCheck !== null ? elementCheck : super.renderOutsideViewport();
   }
 
   /** @override */
@@ -170,6 +174,34 @@ export class AmpAd3PImpl extends AMP.BaseElement {
    * @override
    */
   onLayoutMeasure() {
+    console.log('amp-ad-3p-impl.js request resize!');
+
+    if (!this.resizeRequest_) {
+      const currentHeight = this.element.offsetHeight;
+      user().assert(currentHeight === 0 || currentHeight === 150,
+          `Initial height ${currentHeight} was not expected value 150`);
+
+      // Calculate the new height based on the width.
+      const currentWidth = this.element.offsetWidth;
+      const newHeight = AmpAd3PImpl.getHeightForContext(
+          this.element.offsetWidth);
+
+      // If resizing fails, AMP will try to defer to an overflow element. We
+      // don't need to show an overflow, so just add an empty div to placate it.
+      const dummyOverflowElement = document.createElement('div');
+      dummyOverflowElement.setAttribute('overflow', '1');
+      this.element.appendChild(dummyOverflowElement);
+
+      // Try to resize.
+      this.resizeRequest_ = this.attemptChangeSize(newHeight, undefined).then(
+          () => {
+            console.log('Resized w=%o h->%o %o', currentWidth, newHeight, this);
+          },
+          () => {
+            console.log('Did not resize');
+          });
+    }
+
     this.isInFixedContainer_ = !isAdPositionAllowed(this.element, this.win);
     /** detect ad containers, add the list to element as a new attribute */
     if (this.container_ === undefined) {
@@ -181,6 +213,46 @@ export class AmpAd3PImpl extends AMP.BaseElement {
     if (this.xOriginIframeHandler_) {
       this.xOriginIframeHandler_.onLayoutMeasure();
     }
+  }
+
+  /**
+   * @param {number} width
+   * @return {number}
+   */
+  static getHeightForContext(width) {
+    // TODO: BTF sizes
+
+    if (width > 728) {
+      return 90;
+    }
+    if (width > 468) {
+      return 60;
+    }
+    if (width > 336) {
+      return 280;
+    }
+    if (width > 320) {
+      return 100;
+    }
+    if (width > 250) {
+      return 250;
+    }
+    if (width > 234) {
+      return 60;
+    }
+    if (width > 200) {
+      return 200;
+    }
+    if (width > 180) {
+      return 150;
+    }
+    if (width > 125) {
+      return 125;
+    }
+    if (width > 120) {
+      return 120;
+    }
+    return 50;
   }
 
   /**
@@ -228,7 +300,7 @@ export class AmpAd3PImpl extends AMP.BaseElement {
         '<amp-ad> is not allowed to be placed in elements with ' +
         'position:fixed: %s', this.element);
     incrementLoadingAds(this.win);
-    return this.layoutPromise_ = getAdCid(this).then(cid => {
+    const adIdPromise = getAdCid(this).then(cid => {
       this.uiHandler.setDisplayState(AdDisplayState.LOADING);
       const opt_context = {
         clientId: cid || null,
@@ -246,6 +318,8 @@ export class AmpAd3PImpl extends AMP.BaseElement {
           this);
       return this.xOriginIframeHandler_.init(iframe);
     });
+    return this.layoutPromise_ = (this.resizeRequest_ || Promise.resolve())
+        .then(adIdPromise);
   }
 
   /** @override  */
