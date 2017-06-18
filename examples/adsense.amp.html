@@ -59,20 +59,27 @@
     <button on="tap:amp-user-notification.dismiss" role="button" tabindex="0">I accept</button>
   </amp-user-notification>
 
-  <h2>AdSense</h2>
-  <amp-ad width=300 height=250
+  <h2>AdSense 1</h2>
+  <amp-ad
+      height=150
+      layout="fixed-height"
       type="adsense"
-      data-ad-client="ca-pub-2005682797531342"
-      data-ad-slot="7046626912">
+      data-ad-client="ca-pub-2383777339857329"
+      data-ad-slot="6148071663"
+      data-format="rspv">
     <div placeholder></div>
     <div fallback></div>
   </amp-ad>
 
-  <amp-ad width=300 height=250
-          type="adsense"
-          data-ad-client="ca-pub-2005682797531342"
-          data-ad-slot="7046626912"
-          data-consent-notification-id="amp-user-notification">
+  <h2>AdSense 2</h2>
+  <amp-ad
+      height=150
+      layout="fixed-height"
+      type="adsense"
+      data-ad-client="ca-pub-2383777339857329"
+      data-ad-slot="6148071663"
+      data-consent-notification-id="amp-user-notification"
+      data-format="rspv">
     <div placeholder>should only show ad after notification get dismissed</div>
     <div fallback></div>
   </amp-ad>
@@ -81,13 +88,16 @@
     <!-- Make the second ad below the fold. -->
   </div>
 
-  <h2>AdSense ad 2</h2>
+  <h2>AdSense 3</h2>
 
-  <amp-ad width=300 height=250
+  <amp-ad
+      height=150
+      layout="fixed-height"
       type="adsense"
-      data-ad-client="ca-pub-2005682797531342"
-      data-ad-slot="7046626912"
-      data-adtest="on">
+      data-ad-client="ca-pub-2383777339857329"
+      data-ad-slot="6148071663"
+      data-adtest="on"
+      data-format="rspv">
     <div placeholder></div>
     <div fallback></div>
   </amp-ad>

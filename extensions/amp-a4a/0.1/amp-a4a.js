@@ -215,6 +215,8 @@ export class AmpA4A extends AMP.BaseElement {
     super(element);
     dev().assert(AMP.AmpAdUIHandler);
     dev().assert(AMP.AmpAdXOriginIframeHandler);
+    console.log('ctor6!');
+
 
     /** @private {?Promise<?CreativeMetaDataDef>} */
     this.adPromise_ = null;

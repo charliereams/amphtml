@@ -78,6 +78,8 @@ export class AmpAdNetworkAdsenseImpl extends AmpA4A {
   constructor(element) {
     super(element);
 
+    console.log('ctor2!');
+
     /**
      * @type {!../../../ads/google/a4a/performance.GoogleAdLifecycleReporter}
      */

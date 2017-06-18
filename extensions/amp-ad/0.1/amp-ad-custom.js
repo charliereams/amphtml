@@ -41,6 +41,8 @@ export class AmpAdCustom extends AMP.BaseElement {
   /** @param {!AmpElement} element */
   constructor(element) {
     super(element);
+
+    console.log('ctor3!');
     /** @private {string} The base URL of the ad server for this ad */
     this.url_ = element.getAttribute('data-url');
 
