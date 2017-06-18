@@ -222,6 +222,7 @@ export class AmpAd3PImpl extends AMP.BaseElement {
             this.hasBeenAligned_ = 1;
             var at = this.element.getBoundingClientRect();
             // NB: can't use attemptChangeSize here, this must succeed.
+            // TODO(charliereams): This is wrong for RTL.
             this.element.getResources().changeSize(
                 this.element, undefined, undefined, undefined,
                 {left: -1 * at.left});
