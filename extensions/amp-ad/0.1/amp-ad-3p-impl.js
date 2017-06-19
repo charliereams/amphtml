@@ -95,7 +95,11 @@ export class AmpAd3PImpl extends AMP.BaseElement {
     this.lifecycleReporter = googleLifecycleReporterFactory(
         this, ReporterNamespace.AMP);
 
-    /** @private {boolean} */
+    /**
+     * For full-width responsive ads, whether the alignment change (which nudges
+     * the edge of the add up to the edge of the viewport) has happened.
+     * @private {boolean}
+     */
     this.hasBeenAligned_ = false;
 
     /** @private {string} */
@@ -225,7 +229,8 @@ export class AmpAd3PImpl extends AMP.BaseElement {
     if (this.isResponsive() && !this.hasBeenAligned_) {
       this.hasBeenAligned_ = 1;
       var at = this.element.getBoundingClientRect();
-      // NB: can't use attemptChangeSize here, this must succeed.
+      // NB: can't use attemptChangeSize here, this must succeed. But it doesn't
+      // actually change the size (it just changes the horizontal margins).
       // TODO(charliereams): This is wrong for RTL.
       this.element.getResources().changeSize(
           this.element, undefined, undefined, undefined,
