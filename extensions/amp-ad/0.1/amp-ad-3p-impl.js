@@ -156,6 +156,19 @@ export class AmpAd3PImpl extends AMP.BaseElement {
     this.uiHandler = new AmpAdUIHandler(this);
 
     setupA2AListener(this.win);
+
+    // TODO: is this the right place for this? Can we do it earlier?
+    // TODO: should we block on this in layoutCallback? Or can we just
+    // leave it to succeed / fail?
+    this.attemptChangeSize(
+        AmpAd3PImpl.getResponsiveHeightForContext(window.innerWidth),
+        undefined).then(
+        () => {
+          console.log('resized');
+        },
+        () => {
+          console.log('not resized');
+        });
   }
 
   /**
@@ -199,18 +212,6 @@ export class AmpAd3PImpl extends AMP.BaseElement {
       const dummyOverflowElement = document.createElement('div');
       dummyOverflowElement.setAttribute('overflow', '1');
       this.element.appendChild(dummyOverflowElement);
-
-      // TODO: should we block on this in layoutCallback? Or can we just
-      // leave it to succeed / fail?
-      this.attemptChangeSize(
-          AmpAd3PImpl.getResponsiveHeightForContext(window.innerWidth),
-          undefined).then(
-          () => {
-            console.log('resized');
-          },
-          () => {
-            console.log('not resized');
-          });
     }
 
     this.isInFixedContainer_ = !isAdPositionAllowed(this.element, this.win);
